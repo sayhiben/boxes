@@ -28,8 +28,6 @@ class ConsoleProfile:
     angle: float
     panel: float
     top: float
-    d1: float
-    d2: float
     has_top: bool
     removable_panel: bool
     glued_panel: bool
@@ -116,9 +114,6 @@ The sides and bottom are generated as single pieces across all three sections.
         if not has_top:
             top = 0.0
 
-        d1 = self.thickness * math.cos(math.radians(angle))
-        d2 = self.thickness * math.sin(math.radians(angle))
-
         return ConsoleProfile(
             y=y,
             h=h,
@@ -126,8 +121,6 @@ The sides and bottom are generated as single pieces across all three sections.
             angle=angle,
             panel=panel,
             top=top,
-            d1=d1,
-            d2=d2,
             has_top=has_top,
             removable_panel=removable_panel,
             glued_panel=glued_panel,
@@ -144,18 +137,10 @@ The sides and bottom are generated as single pieces across all three sections.
         if removable_panel:
             self.rectangularHole(-3 * t, 1.5 * t, 2.5 * t, 1.05 * t)
 
-    def _draw_top_segment(self, profile: ConsoleProfile, *, forward: bool) -> None:
+    def _draw_top_segment(self, profile: ConsoleProfile) -> None:
         if profile.top <= 0:
             return
-        if profile.top > profile.d2:
-            if forward:
-                self.edge(profile.d2)
-                self.edges["f"](profile.top - profile.d2)
-            else:
-                self.edges["f"](profile.top - profile.d2)
-                self.edge(profile.d2)
-        else:
-            self.edge(profile.top)
+        self.edges["f"](profile.top)
 
     def _add_side_internal_features(
         self,
@@ -209,10 +194,8 @@ The sides and bottom are generated as single pieces across all three sections.
             self.corner(90)
 
             # front vertical (outer front)
-            front_vert = front.front_height + bottom.endwidth() - front.d1
+            front_vert = front.front_height + bottom.endwidth()
             self.edges["f"](front_vert)
-            if front.d1 > 0:
-                self.edge(front.d1)
             self.corner(90 - front.angle)
 
             # front panel
@@ -225,7 +208,7 @@ The sides and bottom are generated as single pieces across all three sections.
 
             if front.has_top:
                 self.corner(front.angle)
-                self._draw_top_segment(front, forward=True)
+                self._draw_top_segment(front)
                 if box_len:
                     self.corner(-box_angle)
             else:
@@ -240,7 +223,7 @@ The sides and bottom are generated as single pieces across all three sections.
 
             # back top (reverse direction)
             if back.has_top:
-                self._draw_top_segment(back, forward=False)
+                self._draw_top_segment(back)
 
             # back panel
             self.corner(back.angle)
@@ -248,9 +231,7 @@ The sides and bottom are generated as single pieces across all three sections.
             self.corner(90 - back.angle)
 
             # back vertical (outer back)
-            if back.d1 > 0:
-                self.edge(back.d1)
-            back_vert = back.front_height + bottom.startwidth() - back.d1
+            back_vert = back.front_height + bottom.startwidth()
             self.edges["f"](back_vert)
             self.corner(90)
 
@@ -346,8 +327,8 @@ The sides and bottom are generated as single pieces across all three sections.
     def _back_wall_bottom_edge(self, width: float):
         clear, mid_len = self._finger_span(width)
         if mid_len > 0:
-            return edges.CompoundEdge(self, ("e", "F", "e"), (clear, mid_len, clear))
-        return "F"
+            return edges.CompoundEdge(self, ("e", "f", "e"), (clear, mid_len, clear))
+        return "f"
 
     def _panel_hardware_height(self, glued_panel: bool) -> float:
         t = self.thickness
@@ -363,38 +344,48 @@ The sides and bottom are generated as single pieces across all three sections.
         overallheight = y + edges_list[0].spacing() + edges_list[2].spacing()
         return overallwidth, overallheight
 
+    def _top_depth(self, profile: ConsoleProfile, top_front_edge: str, top_back_edge: str) -> float:
+        front_edge = self.edges.get(top_front_edge, top_front_edge)
+        back_edge = self.edges.get(top_back_edge, top_back_edge)
+        depth = profile.top - front_edge.startwidth() - back_edge.startwidth()
+        return max(0.0, depth)
+
     def _console_row_height(self, profile: ConsoleProfile, x: float, bottom) -> float:
         t = self.thickness
         heights = []
         heights.append(self._rect_wall_size(
-            profile.front_height - profile.d1,
+            profile.front_height,
             x,
             ("F", "e", "F", bottom),
         )[1])
 
         if profile.glued_panel:
             panel_x = x
-            panel_edges = "EEEE"
+            panel_edges = "eeee"
         elif profile.removable_panel:
             panel_x = x - 2 * t
-            panel_edges = "hEhE"
+            panel_edges = "hehe"
         else:
             panel_x = x
-            panel_edges = "FEFE"
+            panel_edges = "FeFe"
         heights.append(self._rect_wall_size(profile.panel, panel_x, panel_edges)[1])
 
         if profile.has_top:
-            heights.append(self._rect_wall_size(
-                profile.top - profile.d2,
-                x,
-                ("F", "E", "F", "F"),
-            )[1])
+            top_front_edge = "E"
+            top_back_edge = "F"
+            top_depth = self._top_depth(profile, top_front_edge, top_back_edge)
+            if top_depth > 0:
+                heights.append(self._rect_wall_size(
+                    top_depth,
+                    x,
+                    ("F", top_front_edge, "F", top_back_edge),
+                )[1])
 
         back_bottom_edge = self._back_wall_bottom_edge(x)
         heights.append(self._rect_wall_size(
             profile.h,
             x,
-            ("F", back_bottom_edge, "F", "f"),
+            ("f", back_bottom_edge, "f", "f"),
         )[1])
 
         row_height = max(heights) + self.spacing
@@ -419,7 +410,7 @@ The sides and bottom are generated as single pieces across all three sections.
 
         # Front wall (below panel)
         self.rectangularWall(
-            profile.front_height - profile.d1,
+            profile.front_height,
             x,
             ("F", "e", "F", bottom),
             ignore_widths=[7, 4],
@@ -429,21 +420,25 @@ The sides and bottom are generated as single pieces across all three sections.
 
         # Panel
         if profile.glued_panel:
-            self.rectangularWall(profile.panel, x, "EEEE", move="right", label=f"{label_prefix} Panel")
+            self.rectangularWall(profile.panel, x, "eeee", move="right", label=f"{label_prefix} Panel")
         elif profile.removable_panel:
-            self.rectangularWall(profile.panel, x - 2 * t, "hEhE", move="right", label=f"{label_prefix} Panel")
+            self.rectangularWall(profile.panel, x - 2 * t, "hehe", move="right", label=f"{label_prefix} Panel")
         else:
-            self.rectangularWall(profile.panel, x, "FEFE", move="right", label=f"{label_prefix} Panel")
+            self.rectangularWall(profile.panel, x, "FeFe", move="right", label=f"{label_prefix} Panel")
 
         # Top
         if profile.has_top:
-            self.rectangularWall(
-                profile.top - profile.d2,
-                x,
-                ("F", "E", "F", top_back_edge),
-                move="right",
-                label=f"{label_prefix} Top",
-            )
+            top_front_edge = "E"
+            top_back_edge = "F"
+            top_depth = self._top_depth(profile, top_front_edge, top_back_edge)
+            if top_depth > 0:
+                self.rectangularWall(
+                    top_depth,
+                    x,
+                    ("F", top_front_edge, "F", top_back_edge),
+                    move="right",
+                    label=f"{label_prefix} Top",
+                )
 
         # Back wall (internal)
         back_bottom_edge = self._back_wall_bottom_edge(x)
@@ -455,7 +450,7 @@ The sides and bottom are generated as single pieces across all three sections.
         self.rectangularWall(
             profile.h,
             x,
-            ("F", back_bottom_edge, "F", back_top_edge),
+            ("f", back_bottom_edge, "f", back_top_edge),
             ignore_widths=[0, 3],
             callback=back_wall_callback,
             move="right",
