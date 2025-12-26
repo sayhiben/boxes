@@ -93,9 +93,9 @@ The sides and bottom are generated as single pieces across all three sections.
             help="back Console2 removable panel mount (springs or magnets)")
 
         self.argparser.add_argument(
-            "--panel_magnet_diameter", action="store", type=float, default=3.0,
+            "--panel_magnet_diameter", action="store", type=float, default=5.0,
             help="diameter of panel magnets when magnets are used (in mm)")
-        self.panel_magnet_diameter: float = 3.0
+        self.panel_magnet_diameter: float = 5.0
 
         # Middle box
         self.argparser.add_argument(
@@ -363,6 +363,15 @@ The sides and bottom are generated as single pieces across all three sections.
         depth = profile.top - front_edge.startwidth() - back_edge.startwidth()
         return max(0.0, depth)
 
+    def _panel_width(self, x: float, panel_edges) -> float:
+        if isinstance(panel_edges, str):
+            panel_edges = list(panel_edges)
+        edges_list = [self.edges.get(e, e) for e in panel_edges]
+        width = x - edges_list[0].startwidth() - edges_list[2].startwidth()
+        if width <= 0:
+            raise ValueError("Panel width is too small for the selected edge profile.")
+        return width
+
     def _console_row_height(
         self,
         profile: ConsoleProfile,
@@ -373,7 +382,6 @@ The sides and bottom are generated as single pieces across all three sections.
         top_front_edge_override=None,
         top_back_edge_override=None,
     ) -> float:
-        t = self.thickness
         heights = []
         heights.append(self._rect_wall_size(
             profile.front_height,
@@ -382,11 +390,10 @@ The sides and bottom are generated as single pieces across all three sections.
         )[1])
 
         if profile.removable_panel:
-            panel_x = x - 2 * t
             panel_edges = "hehe"
         else:
-            panel_x = x
             panel_edges = "FeFe"
+        panel_x = self._panel_width(x, panel_edges)
         heights.append(self._rect_wall_size(profile.panel, panel_x, panel_edges)[1])
 
         if profile.has_top:
@@ -429,8 +436,6 @@ The sides and bottom are generated as single pieces across all three sections.
         top_front_edge_override=None,
         top_back_edge_override=None,
     ) -> None:
-        t = self.thickness
-
         back_top_edge = "f"
         top_back_edge = "F"
 
@@ -446,9 +451,17 @@ The sides and bottom are generated as single pieces across all three sections.
 
         # Panel
         if profile.removable_panel:
-            self.rectangularWall(profile.panel, x - 2 * t, "hehe", move="right", label=f"{label_prefix} Panel")
+            panel_edges = "hehe"
         else:
-            self.rectangularWall(profile.panel, x, "FeFe", move="right", label=f"{label_prefix} Panel")
+            panel_edges = "FeFe"
+        panel_x = self._panel_width(x, panel_edges)
+        self.rectangularWall(
+            profile.panel,
+            panel_x,
+            panel_edges,
+            move="right",
+            label=f"{label_prefix} Panel",
+        )
 
         # Top
         if profile.has_top:
