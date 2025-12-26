@@ -30,7 +30,7 @@ class ConsoleProfile:
     top: float
     has_top: bool
     removable_panel: bool
-    glued_panel: bool
+    panel_mount: str
 
 
 class MatrixStand(Boxes):
@@ -67,8 +67,9 @@ The sides and bottom are generated as single pieces across all three sections.
             "--front_removable_panel", action="store", type=boolarg, default=True,
             help="front Console2 panel is removable")
         self.argparser.add_argument(
-            "--front_glued_panel", action="store", type=boolarg, default=True,
-            help="front Console2 panel is glued and not held by finger joints")
+            "--front_panel_mount", action="store", type=str, default="springs",
+            choices=["springs", "magnets"],
+            help="front Console2 removable panel mount (springs or magnets)")
 
         # Back Console2 (faces backward)
         self.argparser.add_argument(
@@ -87,8 +88,14 @@ The sides and bottom are generated as single pieces across all three sections.
             "--back_removable_panel", action="store", type=boolarg, default=True,
             help="back Console2 panel is removable")
         self.argparser.add_argument(
-            "--back_glued_panel", action="store", type=boolarg, default=True,
-            help="back Console2 panel is glued and not held by finger joints")
+            "--back_panel_mount", action="store", type=str, default="springs",
+            choices=["springs", "magnets"],
+            help="back Console2 removable panel mount (springs or magnets)")
+
+        self.argparser.add_argument(
+            "--panel_magnet_diameter", action="store", type=float, default=3.0,
+            help="diameter of panel magnets when magnets are used (in mm)")
+        self.panel_magnet_diameter: float = 3.0
 
         # Middle box
         self.argparser.add_argument(
@@ -99,7 +106,7 @@ The sides and bottom are generated as single pieces across all three sections.
             help="height of the middle box section (in mm)")
 
     def _console_profile(self, *, y: float, h: float, front_height: float, angle: float,
-                         removable_panel: bool, glued_panel: bool) -> ConsoleProfile:
+                         removable_panel: bool, panel_mount: str) -> ConsoleProfile:
         if h <= front_height:
             raise ValueError("Console2 height must be larger than front_height.")
 
@@ -123,19 +130,24 @@ The sides and bottom are generated as single pieces across all three sections.
             top=top,
             has_top=has_top,
             removable_panel=removable_panel,
-            glued_panel=glued_panel,
+            panel_mount=panel_mount,
         )
 
-    def _draw_panel_edge(self, length: float, removable_panel: bool, glued_panel: bool) -> None:
+    def _draw_panel_edge(self, length: float, removable_panel: bool, panel_mount: str) -> None:
         t = self.thickness
         if removable_panel:
-            self.rectangularHole(3 * t, 1.5 * t, 2.5 * t, 1.05 * t)
-        if not removable_panel and not glued_panel:
-            self.edges["f"](length)
-        else:
+            if panel_mount == "magnets":
+                self.hole(3 * t, 1.5 * t, d=self.panel_magnet_diameter)
+            else:
+                self.rectangularHole(3 * t, 1.5 * t, 2.5 * t, 1.05 * t)
             self.edge(length)
+        else:
+            self.edges["f"](length)
         if removable_panel:
-            self.rectangularHole(-3 * t, 1.5 * t, 2.5 * t, 1.05 * t)
+            if panel_mount == "magnets":
+                self.hole(-3 * t, 1.5 * t, d=self.panel_magnet_diameter)
+            else:
+                self.rectangularHole(-3 * t, 1.5 * t, 2.5 * t, 1.05 * t)
 
     def _draw_top_segment(self, profile: ConsoleProfile) -> None:
         if profile.top <= 0:
@@ -199,7 +211,7 @@ The sides and bottom are generated as single pieces across all three sections.
             self.corner(90 - front.angle)
 
             # front panel
-            self._draw_panel_edge(front.panel, front.removable_panel, front.glued_panel)
+            self._draw_panel_edge(front.panel, front.removable_panel, front.panel_mount)
 
             # box slope
             delta_h = back.h - front.h
@@ -227,7 +239,7 @@ The sides and bottom are generated as single pieces across all three sections.
 
             # back panel
             self.corner(back.angle)
-            self._draw_panel_edge(back.panel, back.removable_panel, back.glued_panel)
+            self._draw_panel_edge(back.panel, back.removable_panel, back.panel_mount)
             self.corner(90 - back.angle)
 
             # back vertical (outer back)
@@ -262,27 +274,25 @@ The sides and bottom are generated as single pieces across all three sections.
             else:
                 self.fingerHolesAt(pos_front, 0, width, 90)
 
-    def panel_side(self, l, move=None):
+    def panel_side(self, l, move=None, *, panel_mount: str = "springs"):
         t = self.thickness
-        s = 0.1 * t
 
-        tw, th = l, 3 * t
-
-        if not self.glued_panel:
-            th += t
+        tw, th = l, 4 * t
 
         if self.move(tw, th, move, True):
             return
 
-        self.rectangularHole(3 * t, 1.5 * t, 3 * t, 1.05 * t)
-        self.rectangularHole(l - 3 * t, 1.5 * t, 3 * t, 1.05 * t)
-        self.rectangularHole(l / 2, 1.5 * t, 2 * t, t)
-        if self.glued_panel:
-            self.polyline(*([l, 90, t, 90, t, -90, t, -90, t, 90, t, 90] * 2))
+        if panel_mount == "magnets":
+            self.hole(3 * t, 1.5 * t, d=self.panel_magnet_diameter)
+            self.hole(l - 3 * t, 1.5 * t, d=self.panel_magnet_diameter)
         else:
-            self.polyline(l, 90, 3 * t, 90)
-            self.edges["f"](l)
-            self.polyline(0, 90, 3 * t, 90)
+            self.rectangularHole(3 * t, 1.5 * t, 3 * t, 1.05 * t)
+            self.rectangularHole(l - 3 * t, 1.5 * t, 3 * t, 1.05 * t)
+            self.rectangularHole(l / 2, 1.5 * t, 2 * t, t)
+
+        self.polyline(l, 90, 3 * t, 90)
+        self.edges["f"](l)
+        self.polyline(0, 90, 3 * t, 90)
         self.move(tw, th, move)
 
     def panel_lock(self, l, move=None):
@@ -303,19 +313,6 @@ The sides and bottom are generated as single pieces across all three sections.
         self.polyline(*([t, 90, 2 * t, 90, t, -90] + end + [l] + list(reversed(end))))
         self.move(tw, th, move)
 
-    def panel_cross_beam(self, l, move=None):
-        t = self.thickness
-
-        tw, th = l + 2 * t, 3 * t
-
-        if self.move(tw, th, move, True):
-            return
-
-        self.moveTo(t, 0)
-        self.polyline(*([l, 90, t, -90, t, 90, t, 90, t, -90, t, 90] * 2))
-
-        self.move(tw, th, move)
-
     def _finger_span(self, length: float) -> tuple[float, float]:
         finger_len = self.edges["f"].settings.finger * self.thickness
         clear = min(finger_len, length / 8.0)
@@ -330,11 +327,27 @@ The sides and bottom are generated as single pieces across all three sections.
             return edges.CompoundEdge(self, ("e", "f", "e"), (clear, mid_len, clear))
         return "f"
 
-    def _panel_hardware_height(self, glued_panel: bool) -> float:
+    def _flush_back_top_edge(self):
+        edge = getattr(self, "_flush_back_top_edge_cache", None)
+        if edge is not None:
+            return edge
+
+        class FlushFingerJointEdge(edges.FingerJointEdgeCounterPart):
+            def startwidth(self) -> float:
+                return 0.0
+
+        edge = FlushFingerJointEdge(self, self.edges["F"].settings)
+        self._flush_back_top_edge_cache = edge
+        return edge
+
+    def _panel_hardware_height(self, panel_mount: str) -> float:
         t = self.thickness
-        lock_height = 2.5 * t
-        side_height = 3 * t + (0 if glued_panel else t)
-        return 2 * (lock_height + self.spacing) + 2 * (side_height + self.spacing)
+        side_height = 4 * t
+        total_height = 2 * (side_height + self.spacing)
+        if panel_mount == "springs":
+            lock_height = 2.5 * t
+            total_height += 2 * (lock_height + self.spacing)
+        return total_height
 
     def _rect_wall_size(self, x: float, y: float, edges_spec) -> tuple[float, float]:
         if isinstance(edges_spec, str):
@@ -350,7 +363,16 @@ The sides and bottom are generated as single pieces across all three sections.
         depth = profile.top - front_edge.startwidth() - back_edge.startwidth()
         return max(0.0, depth)
 
-    def _console_row_height(self, profile: ConsoleProfile, x: float, bottom) -> float:
+    def _console_row_height(
+        self,
+        profile: ConsoleProfile,
+        x: float,
+        bottom,
+        *,
+        top_depth_override: float | None = None,
+        top_front_edge_override=None,
+        top_back_edge_override=None,
+    ) -> float:
         t = self.thickness
         heights = []
         heights.append(self._rect_wall_size(
@@ -359,10 +381,7 @@ The sides and bottom are generated as single pieces across all three sections.
             ("F", "e", "F", bottom),
         )[1])
 
-        if profile.glued_panel:
-            panel_x = x
-            panel_edges = "eeee"
-        elif profile.removable_panel:
+        if profile.removable_panel:
             panel_x = x - 2 * t
             panel_edges = "hehe"
         else:
@@ -371,9 +390,13 @@ The sides and bottom are generated as single pieces across all three sections.
         heights.append(self._rect_wall_size(profile.panel, panel_x, panel_edges)[1])
 
         if profile.has_top:
-            top_front_edge = "E"
-            top_back_edge = "F"
-            top_depth = self._top_depth(profile, top_front_edge, top_back_edge)
+            top_front_edge = top_front_edge_override or "E"
+            top_back_edge = top_back_edge_override or "F"
+            top_depth = (
+                top_depth_override
+                if top_depth_override is not None
+                else self._top_depth(profile, top_front_edge, top_back_edge)
+            )
             if top_depth > 0:
                 heights.append(self._rect_wall_size(
                     top_depth,
@@ -390,7 +413,7 @@ The sides and bottom are generated as single pieces across all three sections.
 
         row_height = max(heights) + self.spacing
         if profile.removable_panel:
-            row_height = max(row_height, self._panel_hardware_height(profile.glued_panel))
+            row_height = max(row_height, self._panel_hardware_height(profile.panel_mount))
         return row_height
 
     def _render_console_parts(
@@ -402,6 +425,9 @@ The sides and bottom are generated as single pieces across all three sections.
         box_y: float,
         box_h: float,
         label_prefix: str,
+        top_depth_override: float | None = None,
+        top_front_edge_override=None,
+        top_back_edge_override=None,
     ) -> None:
         t = self.thickness
 
@@ -419,18 +445,20 @@ The sides and bottom are generated as single pieces across all three sections.
         )
 
         # Panel
-        if profile.glued_panel:
-            self.rectangularWall(profile.panel, x, "eeee", move="right", label=f"{label_prefix} Panel")
-        elif profile.removable_panel:
+        if profile.removable_panel:
             self.rectangularWall(profile.panel, x - 2 * t, "hehe", move="right", label=f"{label_prefix} Panel")
         else:
             self.rectangularWall(profile.panel, x, "FeFe", move="right", label=f"{label_prefix} Panel")
 
         # Top
         if profile.has_top:
-            top_front_edge = "E"
-            top_back_edge = "F"
-            top_depth = self._top_depth(profile, top_front_edge, top_back_edge)
+            top_front_edge = top_front_edge_override or "E"
+            top_back_edge = top_back_edge_override or "F"
+            top_depth = (
+                top_depth_override
+                if top_depth_override is not None
+                else self._top_depth(profile, top_front_edge, top_back_edge)
+            )
             if top_depth > 0:
                 self.rectangularWall(
                     top_depth,
@@ -459,22 +487,11 @@ The sides and bottom are generated as single pieces across all three sections.
 
         # Hardware for panel
         if profile.removable_panel:
-            old_glued_panel = bool(getattr(self, "glued_panel", profile.glued_panel))
-            old_removable_panel = bool(getattr(self, "removable_panel", profile.removable_panel))
-            self.glued_panel = bool(profile.glued_panel)
-            self.removable_panel = bool(profile.removable_panel)
-            try:
-                if profile.glued_panel:
-                    self.panel_cross_beam(x - 2.05 * t, "rotated right")
-                    self.panel_cross_beam(x - 2.05 * t, "rotated right")
-
+            if profile.panel_mount == "springs":
                 self.panel_lock(profile.panel, "up")
                 self.panel_lock(profile.panel, "up")
-                self.panel_side(profile.panel, "up")
-                self.panel_side(profile.panel, "up")
-            finally:
-                self.glued_panel = old_glued_panel
-                self.removable_panel = old_removable_panel
+            self.panel_side(profile.panel, "up", panel_mount=profile.panel_mount)
+            self.panel_side(profile.panel, "up", panel_mount=profile.panel_mount)
 
     def render(self):
         x = self.x
@@ -502,7 +519,7 @@ The sides and bottom are generated as single pieces across all three sections.
             front_height=self.front_front_height,
             angle=self.front_angle,
             removable_panel=self.front_removable_panel,
-            glued_panel=self.front_glued_panel,
+            panel_mount=self.front_panel_mount,
         )
         back = self._console_profile(
             y=back_y,
@@ -510,7 +527,7 @@ The sides and bottom are generated as single pieces across all three sections.
             front_height=self.back_front_height,
             angle=self.back_angle,
             removable_panel=self.back_removable_panel,
-            glued_panel=self.back_glued_panel,
+            panel_mount=self.back_panel_mount,
         )
 
         if box_h > min(front.h, back.h):
@@ -573,6 +590,15 @@ The sides and bottom are generated as single pieces across all three sections.
             )
         row_y += row3_height
 
+        back_row_height = self._console_row_height(
+            back,
+            x,
+            bottom,
+            top_depth_override=back.top,
+            top_front_edge_override=self._flush_back_top_edge(),
+            top_back_edge_override="e",
+        )
+
         with self.saved_context():
             self.moveTo(0, row_y)
             self._render_console_parts(
@@ -582,4 +608,8 @@ The sides and bottom are generated as single pieces across all three sections.
                 box_y=box_y,
                 box_h=box_h,
                 label_prefix="Back Console2",
+                top_depth_override=back.top,
+                top_front_edge_override=self._flush_back_top_edge(),
+                top_back_edge_override="e",
             )
+        row_y += back_row_height
