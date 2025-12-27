@@ -9,7 +9,8 @@ Matrix stand with front and rear angled faces and a center bridge.
 
 This generator builds a stand around the Matrix enclosure. Before you cut,
 measure the Matrix you designed with the Matrix generator and your physical
-panel. Set the stand width (x) and depths so the panel fits snugly with your
+panel. All dimensions here are internal, so add clearance if you want a loose
+fit. Set the stand width (x) and depths so the panel fits snugly with your
 preferred clearance.
 
 The stand is made from three depth segments:
@@ -20,26 +21,27 @@ The stand is made from three depth segments:
 The side panels and bottom are each drawn as single parts spanning all three segments.
 
 #### Settings notes
-- x: overall stand width; match the Matrix width plus any clearance.
+- x: internal stand width; match the Matrix width plus any clearance.
 - front_depth / rear_depth: depth of each angled section.
 - front_section_height / rear_section_height: total height at each section's back wall.
 - front_face_height / rear_face_height: vertical height below each face panel.
 - front_panel_angle / rear_panel_angle: tilt angle in degrees (90 degrees is vertical).
 - center_depth / center_height: size of the center bridge; center_height must be <= both section heights.
-- *_panel_removable and *_panel_mount: choose removable face panels with spring tabs or magnets.
-- panel_magnet_diameter: magnet diameter when using magnets.
+- front_panel_mount / rear_panel_mount: face panels are removable; choose spring tabs or magnets.
+- panel_magnet_diameter: magnet diameter when using magnets (match your hardware).
+- All dimensions are internal; there is no outside sizing option.
 
 #### Build guide
 1. Cut all parts.
 2. Glue the left and right side panels to the bottom panel.
 3. Add the center bridge top (if any) between the side panels.
-4. Assemble the front section: front wall, face panel, top, and back wall.
-5. Assemble the rear section: front wall, face panel, top, and back wall.
-6. Install the panel hardware (springs or magnets) if you chose removable panels.
+4. Assemble the front section: front wall, face panel, top (if any), and back wall.
+5. Assemble the rear section: front wall, face panel, top (if any), and back wall.
+6. Install the panel hardware (springs or magnets) for the removable face panels.
 7. Dry-fit your Matrix and adjust before final glue-up.
 
 #### Customization tips
-- Consider adding wiring or button holes to the rear walls and to the front/rear face panels using a vector editor.
+- Consider adding wiring or button holes to the back walls (front/rear) and to the face panels using a vector editor.
 - If you need extra cable space, increase center_depth or reduce the panel angles.
 
 
@@ -59,7 +61,8 @@ Matrix stand with front and rear angled faces and a center bridge.
 
 This generator builds a stand around the Matrix enclosure. Before you cut,
 measure the Matrix you designed with the Matrix generator and your physical
-panel. Set the stand width (x) and depths so the panel fits snugly with your
+panel. All dimensions here are internal, so add clearance if you want a loose
+fit. Set the stand width (x) and depths so the panel fits snugly with your
 preferred clearance.
 
 The stand is made from three depth segments:
@@ -70,26 +73,27 @@ The stand is made from three depth segments:
 The side panels and bottom are each drawn as single parts spanning all three segments.
 
 #### Settings notes
-- x: overall stand width; match the Matrix width plus any clearance.
+- x: internal stand width; match the Matrix width plus any clearance.
 - front_depth / rear_depth: depth of each angled section.
 - front_section_height / rear_section_height: total height at each section's back wall.
 - front_face_height / rear_face_height: vertical height below each face panel.
 - front_panel_angle / rear_panel_angle: tilt angle in degrees (90 degrees is vertical).
 - center_depth / center_height: size of the center bridge; center_height must be &lt;= both section heights.
-- *_panel_removable and *_panel_mount: choose removable face panels with spring tabs or magnets.
-- panel_magnet_diameter: magnet diameter when using magnets.
+- front_panel_mount / rear_panel_mount: face panels are removable; choose spring tabs or magnets.
+- panel_magnet_diameter: magnet diameter when using magnets (match your hardware).
+- All dimensions are internal; there is no outside sizing option.
 
 #### Build guide
 1. Cut all parts.
 2. Glue the left and right side panels to the bottom panel.
 3. Add the center bridge top (if any) between the side panels.
-4. Assemble the front section: front wall, face panel, top, and back wall.
-5. Assemble the rear section: front wall, face panel, top, and back wall.
-6. Install the panel hardware (springs or magnets) if you chose removable panels.
+4. Assemble the front section: front wall, face panel, top (if any), and back wall.
+5. Assemble the rear section: front wall, face panel, top (if any), and back wall.
+6. Install the panel hardware (springs or magnets) for the removable face panels.
 7. Dry-fit your Matrix and adjust before final glue-up.
 
 #### Customization tips
-- Consider adding wiring or button holes to the rear walls and to the front/rear face panels using a vector editor.
+- Consider adding wiring or button holes to the back walls (front/rear) and to the face panels using a vector editor.
 - If you need extra cable space, increase center_depth or reduce the panel angles.
 
 
