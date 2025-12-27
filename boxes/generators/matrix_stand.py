@@ -237,42 +237,42 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             surroundingspaces=self.FINGERJOINT_SURROUNDING_SPACES,
         )
 
-        self.buildArgParser(x=100)
+        self.buildArgParser(x=180)
 
         # Front section (faces forward)
         self.argparser.add_argument(
             "--front_depth",
             action="store",
             type=float,
-            default=100,
+            default=60,
             help="Depth of the front section (in mm)",
         )
         self.argparser.add_argument(
             "--front_section_height",
             action="store",
             type=float,
-            default=100,
+            default=60,
             help="Height at the back wall of the front section (in mm)",
         )
         self.argparser.add_argument(
             "--front_face_height",
             action="store",
             type=float,
-            default=30,
+            default=20,
             help="Height of the vertical face below the front panel (in mm)",
         )
         self.argparser.add_argument(
             "--front_panel_angle",
             action="store",
             type=float,
-            default=50,
+            default=60,
             help="Angle of the front face panel (90 degrees is vertical)",
         )
         self.argparser.add_argument(
             "--front_panel_mount",
             action="store",
             type=str,
-            default="springs",
+            default="magnets",
             choices=["springs", "magnets"],
             help="Front face panel mount type (springs or magnets)",
         )
@@ -282,35 +282,35 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             "--rear_depth",
             action="store",
             type=float,
-            default=100,
+            default=60,
             help="Depth of the rear section (in mm)",
         )
         self.argparser.add_argument(
             "--rear_section_height",
             action="store",
             type=float,
-            default=100,
+            default=60,
             help="Height at the back wall of the rear section (in mm)",
         )
         self.argparser.add_argument(
             "--rear_face_height",
             action="store",
             type=float,
-            default=30,
+            default=20,
             help="Height of the vertical face below the rear panel (in mm)",
         )
         self.argparser.add_argument(
             "--rear_panel_angle",
             action="store",
             type=float,
-            default=50,
+            default=60,
             help="Angle of the rear face panel (90 degrees is vertical)",
         )
         self.argparser.add_argument(
             "--rear_panel_mount",
             action="store",
             type=str,
-            default="springs",
+            default="magnets",
             choices=["springs", "magnets"],
             help="Rear face panel mount type (springs or magnets)",
         )
@@ -329,14 +329,14 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             "--center_depth",
             action="store",
             type=float,
-            default=60,
+            default=30,
             help="Depth of the center bridge section (in mm)",
         )
         self.argparser.add_argument(
             "--center_height",
             action="store",
             type=float,
-            default=60,
+            default=50,
             help="Height of the center bridge section (in mm)",
         )
 
@@ -368,22 +368,54 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             center_depth=inputs.center_depth,
             center_height=inputs.center_height,
         )
-        front_row_height = self._section_row_height(front_section, inputs.stand_width, bottom_edge)
-        rear_row_height = self._section_row_height(
-            rear_section,
-            inputs.stand_width,
-            bottom_edge,
-            top_depth_override=rear_section.top_depth,
-            top_front_edge_override=self._flush_back_top_edge(),
-            top_back_edge_override="e",
-        )
+        section_specs = [
+            ("Front Section", front_section, False),
+            ("Rear Section", rear_section, True),
+        ]
+        section_rows: list[RowPlan] = []
+        for label_prefix, profile, is_rear in section_specs:
+            top_front_edge, top_back_edge = self._section_top_edges(is_rear=is_rear)
+            row_height = self._section_row_height(
+                profile,
+                inputs.stand_width,
+                bottom_edge,
+                top_front_edge_override=top_front_edge,
+                top_back_edge_override=top_back_edge,
+            )
 
+            def render_section_row(
+                row_y: float,
+                profile: StandSectionProfile = profile,
+                label_prefix: str = label_prefix,
+                top_front_edge: edges.BaseEdge | str = top_front_edge,
+                top_back_edge: edges.BaseEdge | str = top_back_edge,
+            ) -> None:
+                self._render_section_row(
+                    row_y=row_y,
+                    profile=profile,
+                    stand_width=inputs.stand_width,
+                    bottom_edge=bottom_edge,
+                    center_depth=inputs.center_depth,
+                    center_height=inputs.center_height,
+                    label_prefix=label_prefix,
+                    top_front_edge_override=top_front_edge,
+                    top_back_edge_override=top_back_edge,
+                )
+
+            section_rows.append(
+                RowPlan(
+                    name=label_prefix,
+                    height=row_height,
+                    render=render_section_row,
+                )
+            )
+
+        section_height_map = {row.name: row.height for row in section_rows}
         logger.debug(
-            "Row heights: sides=%s base=%s front=%s rear=%s",
+            "Row heights: sides=%s base=%s sections=%s",
             side_row_height,
             base_row_height,
-            front_row_height,
-            rear_row_height,
+            section_height_map,
         )
 
         # Render rows in build order: side panels, base, then each section.
@@ -412,36 +444,8 @@ The side panels and bottom are each drawn as single parts spanning all three seg
                     center_bridge_edge=center_bridge_edge,
                 ),
             ),
-            RowPlan(
-                name="Front Section",
-                height=front_row_height,
-                render=lambda y: self._render_section_row(
-                    row_y=y,
-                    profile=front_section,
-                    stand_width=inputs.stand_width,
-                    bottom_edge=bottom_edge,
-                    center_depth=inputs.center_depth,
-                    center_height=inputs.center_height,
-                    label_prefix="Front Section",
-                ),
-            ),
-            RowPlan(
-                name="Rear Section",
-                height=rear_row_height,
-                render=lambda y: self._render_section_row(
-                    row_y=y,
-                    profile=rear_section,
-                    stand_width=inputs.stand_width,
-                    bottom_edge=bottom_edge,
-                    center_depth=inputs.center_depth,
-                    center_height=inputs.center_height,
-                    label_prefix="Rear Section",
-                    top_depth_override=rear_section.top_depth,
-                    top_front_edge_override=self._flush_back_top_edge(),
-                    top_back_edge_override="e",
-                ),
-            ),
         ]
+        rows.extend(section_rows)
 
         row_y = 0.0
         for row in rows:
@@ -653,14 +657,14 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             )[1]
         )
 
-        face_panel_edges = self._face_panel_edges()
+        face_panel_edges = self.FACE_PANEL_EDGE_SPEC
         face_panel_width = self._face_panel_width(stand_width, face_panel_edges)
         height_candidates.append(
             self._rect_wall_overall_size(profile.face_panel_length, face_panel_width, face_panel_edges)[1]
         )
 
         if profile.has_top:
-            top_front_edge = top_front_edge_override or "E"
+            top_front_edge = top_front_edge_override or "e"
             top_back_edge = top_back_edge_override or "F"
             top_depth = (
                 top_depth_override
@@ -917,17 +921,21 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         center_slope_angle_deg = math.degrees(math.atan2(height_delta, center_depth)) if center_depth else 0.0
         center_slope_length = math.hypot(center_depth, height_delta) if center_depth else 0.0
 
+        # Transition from front panel to center bridge.
+        # Calculate initial corner angle: combine face angle with slope if no top edge.
+        initial_corner_angle = front_section.face_panel_angle_deg
+        if not front_section.has_top and center_slope_length:
+            initial_corner_angle -= center_slope_angle_deg
+
+        self.corner(initial_corner_angle)
+
+        # Draw top edge if present, then adjust for center slope.
         if front_section.has_top:
-            self.corner(front_section.face_panel_angle_deg)
             self._draw_top_edge_segment(front_section)
             if center_slope_length:
                 self.corner(-center_slope_angle_deg)
-        else:
-            if center_slope_length:
-                self.corner(front_section.face_panel_angle_deg - center_slope_angle_deg)
-            else:
-                self.corner(front_section.face_panel_angle_deg)
 
+        # Transition from center bridge to rear panel.
         if center_slope_length:
             self.edge(center_slope_length)
             self.corner(center_slope_angle_deg)
@@ -942,6 +950,7 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             rear_section.face_panel_length,
             rear_section.face_panel_mount,
         )
+        # Transition from rear panel to rear vertical wall.
         self.corner(90 - rear_section.face_panel_angle_deg)
 
         # Rear vertical wall (outer face).
@@ -1086,7 +1095,7 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         Returns:
             None.
         """
-        face_panel_edges = self._face_panel_edges()
+        face_panel_edges = self.FACE_PANEL_EDGE_SPEC
         face_panel_width = self._face_panel_width(stand_width, face_panel_edges)
         self.rectangularWall(
             profile.face_panel_length,
@@ -1121,7 +1130,7 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         if not profile.has_top:
             return
 
-        top_front_edge = top_front_edge_override or "E"
+        top_front_edge = top_front_edge_override or "e"
         top_back_edge = top_back_edge_override or "F"
         top_depth = (
             top_depth_override
@@ -1389,7 +1398,7 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         return "f"
 
     def _flush_back_top_edge(self) -> edges.BaseEdge:
-        """Return a finger joint edge with zero start width for flush tops.
+        """Return a finger joint edge with zero start width for flush top edges.
 
         Args:
             None.
@@ -1407,6 +1416,22 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         edge = FlushFingerJointEdge(self, self.edges["F"].settings)
         self._flush_back_top_edge_cache = edge
         return edge
+
+    def _section_top_edges(self, *, is_rear: bool) -> tuple[edges.BaseEdge | str, edges.BaseEdge | str]:
+        """Return the side-edge profiles for a section's top panel.
+
+        The edge facing the center bridge uses a flush finger joint counterpart
+        so the side joints align. The outer edge uses a straight edge.
+
+        Args:
+            is_rear: Whether the section is the rear section.
+        Returns:
+            tuple[edges.BaseEdge | str, edges.BaseEdge | str]: (front_edge, back_edge) overrides.
+        """
+        flush_edge = self._flush_back_top_edge()
+        if is_rear:
+            return flush_edge, "e"
+        return "e", flush_edge
 
     def _face_panel_hardware_height(self, face_panel_mount: str) -> float:
         """Compute the layout height needed for face panel hardware parts.
@@ -1441,18 +1466,6 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             else:
                 resolved.append(edge)
         return resolved
-
-    def _face_panel_edges(self) -> EdgeSpec:
-        """Return the edge specification for removable face panels.
-
-        The opposing "h" edges add finger holes so the clips/latches can engage.
-
-        Args:
-            None.
-        Returns:
-            EdgeSpec: Edge specification for the face panel.
-        """
-        return self.FACE_PANEL_EDGE_SPEC
 
     def _rect_wall_overall_size(self, width: float, height: float, edges_spec: EdgeSpec) -> tuple[float, float]:
         """Calculate the overall size of a rectangular wall including edge spacing.
