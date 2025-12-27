@@ -1490,10 +1490,14 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         return max(0.0, depth)
 
     def _face_panel_width(self, stand_width: float, face_panel_edges: EdgeSpec) -> float:
-        """Compute the usable face panel width between edge profiles.
+        """Compute the face panel width that matches the stand's overall width.
+
+        The face panel uses hole edges on the long sides; those edges have a
+        larger spacing than finger joints. We compensate so the finished panel
+        spans the same outer width as the finger-jointed section walls.
 
         Args:
-            stand_width: Overall stand width in mm.
+            stand_width: Overall stand width in mm (inner width).
             face_panel_edges: Edge specification for the face panel.
         Returns:
             float: Usable face panel width in mm.
@@ -1501,7 +1505,9 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             ValueError: If the panel width is too small for the edge profiles.
         """
         edges_list = self._resolve_edges(face_panel_edges)
-        panel_width = stand_width - edges_list[0].startwidth() - edges_list[2].startwidth()
+        reference_edge = self.edges["F"]
+        target_outer_width = stand_width + 2 * reference_edge.spacing()
+        panel_width = target_outer_width - edges_list[0].spacing() - edges_list[2].spacing()
         if panel_width <= 0:
             raise ValueError("Face panel width is too small for the selected edge profile.")
         return panel_width
