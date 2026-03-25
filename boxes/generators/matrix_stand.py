@@ -17,12 +17,11 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from boxes import Boxes, edges
-from boxes.drawing import Context, Surface
 
 logger = logging.getLogger(__name__)
 
@@ -94,21 +93,60 @@ class StandSectionProfile:
     has_top: bool
     face_panel_mount: str
 
+    @classmethod
+    def from_inputs(
+        cls,
+        inputs: SectionInputs,
+        *,
+        thickness: float,
+        min_top_depth_multiplier: float,
+    ) -> StandSectionProfile:
+        """Compute derived geometry for a stand section.
+
+        Args:
+            inputs: Raw input dimensions for the section.
+            thickness: Material thickness in mm.
+            min_top_depth_multiplier: Minimum top depth multiplier.
+        Returns:
+            StandSectionProfile: Resolved geometry for the section.
+        """
+        panel_angle_rad = math.radians(inputs.face_panel_angle_deg)
+
+        # Panel length is constrained by the available rise and the available depth.
+        panel_length_by_height = (inputs.back_wall_height - inputs.face_height) / math.sin(panel_angle_rad)
+        panel_length_by_depth = inputs.depth / math.cos(panel_angle_rad)
+        face_panel_length = min(panel_length_by_height, panel_length_by_depth)
+
+        top_depth = inputs.depth - face_panel_length * math.cos(panel_angle_rad)
+        back_wall_height = inputs.face_height + face_panel_length * math.sin(panel_angle_rad)
+
+        min_top_depth = min_top_depth_multiplier * thickness
+        # Avoid tiny top slivers that are hard to cut and glue.
+        has_top = top_depth > min_top_depth
+        if not has_top:
+            top_depth = 0.0
+
+        return cls(
+            depth=inputs.depth,
+            back_wall_height=back_wall_height,
+            face_height=inputs.face_height,
+            face_panel_angle_deg=inputs.face_panel_angle_deg,
+            face_panel_length=face_panel_length,
+            top_depth=top_depth,
+            has_top=has_top,
+            face_panel_mount=inputs.face_panel_mount,
+        )
+
 
 @dataclass(frozen=True)
-class RowPlan:
-    """
-    Layout row plan for rendering.
+class PanelHardwareDims:
+    """Derived dimensions for removable panel hardware."""
 
-    Args:
-        name: Human-readable label for the row.
-        height: Row height in mm, including spacing.
-        render: Callable that draws the row at a given y offset.
-    """
-
-    name: str
-    height: float
-    render: Callable[[float], None]
+    hole_x_offset: float
+    hole_y_offset: float
+    slot_width: float
+    slot_height: float
+    center_slot_width: float
 
 
 class RectangularFingerJointSettings(edges.FingerJointSettings):
@@ -348,7 +386,7 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         )
 
     def render(self) -> None:
-        """Render the Matrix stand parts in ordered layout rows.
+        """Render the Matrix stand parts sequentially.
 
         Args:
             None.
@@ -359,8 +397,16 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         inputs = self._collect_inputs()
         self._validate_inputs(inputs)
 
-        front_section = self._build_section_profile(inputs.front)
-        rear_section = self._build_section_profile(inputs.rear)
+        front_section = StandSectionProfile.from_inputs(
+            inputs.front,
+            thickness=self.thickness,
+            min_top_depth_multiplier=self.MIN_TOP_DEPTH_MULTIPLIER,
+        )
+        rear_section = StandSectionProfile.from_inputs(
+            inputs.rear,
+            thickness=self.thickness,
+            min_top_depth_multiplier=self.MIN_TOP_DEPTH_MULTIPLIER,
+        )
 
         total_depth = rear_section.depth + inputs.center_depth + front_section.depth
 
@@ -368,136 +414,44 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         logger.debug("Front section profile: %s", front_section)
         logger.debug("Rear section profile: %s", rear_section)
 
-        section_specs = [
-            ("Front Section", front_section, False),
-            ("Rear Section", rear_section, True),
-        ]
-        row_renderers: list[tuple[str, Callable[[float], None]]] = []
-
-        # Render rows in build order: side panels, base, then each section.
-        row_renderers.append(
-            (
-                "Side Panels",
-                lambda y: self._render_side_row(
-                    row_y=y,
-                    front_section=front_section,
-                    rear_section=rear_section,
-                    center_depth=inputs.center_depth,
-                    center_height=inputs.center_height,
-                    bottom_edge=bottom_edge,
-                ),
-            )
+        self._render_side_panels(
+            front_section=front_section,
+            rear_section=rear_section,
+            center_depth=inputs.center_depth,
+            center_height=inputs.center_height,
+            bottom_edge=bottom_edge,
         )
-        row_renderers.append(
-            (
-                "Base",
-                lambda y: self._render_base_row(
-                    row_y=y,
-                    total_depth=total_depth,
-                    stand_width=inputs.stand_width,
-                    center_depth=inputs.center_depth,
-                    center_height=inputs.center_height,
-                    rear_section=rear_section,
-                ),
-            )
+        self._render_base_parts(
+            total_depth=total_depth,
+            stand_width=inputs.stand_width,
+            center_depth=inputs.center_depth,
+            center_height=inputs.center_height,
+            rear_section=rear_section,
         )
-        for label_prefix, profile, is_rear in section_specs:
-            top_front_edge, top_back_edge = self._section_top_edges(is_rear=is_rear)
 
-            def render_section_row(
-                row_y: float,
-                profile: StandSectionProfile = profile,
-                label_prefix: str = label_prefix,
-                top_front_edge: edges.BaseEdge | str = top_front_edge,
-                top_back_edge: edges.BaseEdge | str = top_back_edge,
-            ) -> None:
-                self._render_section_row(
-                    row_y=row_y,
-                    profile=profile,
-                    stand_width=inputs.stand_width,
-                    bottom_edge=bottom_edge,
-                    center_depth=inputs.center_depth,
-                    center_height=inputs.center_height,
-                    label_prefix=label_prefix,
-                    top_front_edge_override=top_front_edge,
-                    top_back_edge_override=top_back_edge,
-                )
+        front_top_front_edge, front_top_back_edge = self._section_top_edges(is_rear=False)
+        self._render_section_parts(
+            front_section,
+            inputs.stand_width,
+            bottom_edge,
+            center_depth=inputs.center_depth,
+            center_height=inputs.center_height,
+            label_prefix="Front Section",
+            top_front_edge_override=front_top_front_edge,
+            top_back_edge_override=front_top_back_edge,
+        )
 
-            row_renderers.append((label_prefix, render_section_row))
-
-        # Measure each row by rendering into a temporary surface.
-        rows: list[RowPlan] = []
-        for name, render_row in row_renderers:
-            rows.append(
-                RowPlan(
-                    name=name,
-                    height=self._measure_row_height(render_row),
-                    render=render_row,
-                )
-            )
-
-        row_heights = {row.name: row.height for row in rows}
-        logger.debug("Row heights (measured): %s", row_heights)
-
-        total_height = sum(row.height for row in rows)
-        row_y = total_height
-        for row in rows:
-            row_y -= row.height
-            logger.debug("Rendering row: %s", row.name)
-            row.render(row_y)
-
-    def _apply_context(self, surface: Surface, ctx: Context) -> None:
-        """Apply a drawing context to edges and cached helpers.
-
-        Args:
-            surface: Surface used to collect drawing output.
-            ctx: Drawing context bound to the surface.
-        Returns:
-            None.
-        """
-        self.surface = surface
-        self.ctx = ctx
-        for edge in self.edges.values():
-            edge.ctx = ctx
-        self.fingerHolesAt.ctx = ctx
-        cached_edge = getattr(self, "_flush_back_top_edge_cache", None)
-        if cached_edge is not None:
-            cached_edge.ctx = ctx
-
-    def _measure_row_height(self, render: Callable[[float], None]) -> float:
-        """Measure row height by rendering into a temporary surface.
-
-        Args:
-            render: Callable that draws the row at the provided y offset.
-        Returns:
-            float: Row height in mm, including the inter-row spacing.
-        """
-        original_surface = self.surface
-        original_ctx = self.ctx
-        labels_enabled = getattr(self, "labels", True)
-        debug_enabled = getattr(self, "debug", False)
-
-        if original_surface is None or original_ctx is None:
-            raise RuntimeError("MatrixStand must be opened before measuring row heights.")
-
-        surface, ctx = self.formats.getSurface(self.format)
-        height = 0.0
-        self._apply_context(surface, ctx)
-        try:
-            # Skip labels/debug rectangles so we only measure real parts.
-            self.labels = False
-            self.debug = False
-            render(0.0)
-            height = surface.extents().height
-        finally:
-            self.labels = labels_enabled
-            self.debug = debug_enabled
-            self._apply_context(original_surface, original_ctx)
-
-        if not math.isfinite(height) or height < 0:
-            height = 0.0
-        # Account for spacing that move() reserves between rows.
-        return height + self.spacing
+        rear_top_front_edge, rear_top_back_edge = self._section_top_edges(is_rear=True)
+        self._render_section_parts(
+            rear_section,
+            inputs.stand_width,
+            bottom_edge,
+            center_depth=inputs.center_depth,
+            center_height=inputs.center_height,
+            label_prefix="Rear Section",
+            top_front_edge_override=rear_top_front_edge,
+            top_back_edge_override=rear_top_back_edge,
+        )
 
     def _collect_inputs(self) -> StandInputs:
         """Collect raw input dimensions from CLI arguments.
@@ -580,41 +534,6 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         if section.face_panel_mount not in {"springs", "magnets"}:
             raise ValueError(f"{label} face panel mount must be 'springs' or 'magnets'.")
 
-    def _build_section_profile(self, inputs: SectionInputs) -> StandSectionProfile:
-        """Compute derived geometry for a stand section.
-
-        Args:
-            inputs: Raw input dimensions for the section.
-        Returns:
-            StandSectionProfile: Resolved geometry for the section.
-        """
-        panel_angle_rad = math.radians(inputs.face_panel_angle_deg)
-
-        # Panel length is constrained by the available rise and the available depth.
-        panel_length_by_height = (inputs.back_wall_height - inputs.face_height) / math.sin(panel_angle_rad)
-        panel_length_by_depth = inputs.depth / math.cos(panel_angle_rad)
-        face_panel_length = min(panel_length_by_height, panel_length_by_depth)
-
-        top_depth = inputs.depth - face_panel_length * math.cos(panel_angle_rad)
-        back_wall_height = inputs.face_height + face_panel_length * math.sin(panel_angle_rad)
-
-        min_top_depth = self.MIN_TOP_DEPTH_MULTIPLIER * self.thickness
-        # Avoid tiny top slivers that are hard to cut and glue.
-        has_top = top_depth > min_top_depth
-        if not has_top:
-            top_depth = 0.0
-
-        return StandSectionProfile(
-            depth=inputs.depth,
-            back_wall_height=back_wall_height,
-            face_height=inputs.face_height,
-            face_panel_angle_deg=inputs.face_panel_angle_deg,
-            face_panel_length=face_panel_length,
-            top_depth=top_depth,
-            has_top=has_top,
-            face_panel_mount=inputs.face_panel_mount,
-        )
-
     def _center_bridge_edge(
         self,
         *,
@@ -631,26 +550,20 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         """
         if center_depth <= 0 or center_height <= 0:
             return None
-        clearance, span_length = self._finger_joint_span(center_depth)
-        if span_length > 0:
-            # Keep finger joints in the middle span to avoid tight corners.
-            return edges.CompoundEdge(self, ("e", "f", "e"), (clearance, span_length, clearance))
-        return "e"
+        return self._compound_finger_edge(center_depth, fallback="e")
 
-    def _render_side_row(
+    def _render_side_panels(
         self,
         *,
-        row_y: float,
         front_section: StandSectionProfile,
         rear_section: StandSectionProfile,
         center_depth: float,
         center_height: float,
         bottom_edge: edges.BaseEdge,
     ) -> None:
-        """Render the row containing the left and right side panels.
+        """Render the left and right side panels sequentially.
 
         Args:
-            row_y: Current vertical offset for the row.
             front_section: Geometry for the front section.
             rear_section: Geometry for the rear section.
             center_depth: Depth of the center bridge section.
@@ -659,41 +572,37 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         Returns:
             None.
         """
-        with self.saved_context():
-            self.moveTo(0, row_y)
-            self._draw_combined_side_panel(
-                front_section=front_section,
-                rear_section=rear_section,
-                center_depth=center_depth,
-                center_height=center_height,
-                bottom_edge=bottom_edge,
-                move="right",
-                label="Left Side Panel",
-            )
-            self._draw_combined_side_panel(
-                front_section=front_section,
-                rear_section=rear_section,
-                center_depth=center_depth,
-                center_height=center_height,
-                bottom_edge=bottom_edge,
-                move="right",
-                label="Right Side Panel",
-            )
+        self._draw_combined_side_panel(
+            front_section=front_section,
+            rear_section=rear_section,
+            center_depth=center_depth,
+            center_height=center_height,
+            bottom_edge=bottom_edge,
+            move="up",
+            label="Left Side Panel",
+        )
+        self._draw_combined_side_panel(
+            front_section=front_section,
+            rear_section=rear_section,
+            center_depth=center_depth,
+            center_height=center_height,
+            bottom_edge=bottom_edge,
+            move="up",
+            label="Right Side Panel",
+        )
 
-    def _render_base_row(
+    def _render_base_parts(
         self,
         *,
-        row_y: float,
         total_depth: float,
         stand_width: float,
         center_depth: float,
         center_height: float,
         rear_section: StandSectionProfile,
     ) -> None:
-        """Render the row containing the bottom and center bridge top.
+        """Render the bottom and center bridge top sequentially.
 
         Args:
-            row_y: Current vertical offset for the row.
             total_depth: Total stand depth in mm.
             stand_width: Overall stand width in mm.
             center_depth: Depth of the center bridge section.
@@ -706,76 +615,30 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             center_depth=center_depth,
             center_height=center_height,
         )
-        with self.saved_context():
-            self.moveTo(0, row_y)
+        self.rectangularWall(
+            total_depth,
+            stand_width,
+            "ffff",
+            callback=[
+                lambda: self._add_bottom_finger_holes(
+                    rear_section=rear_section,
+                    center_depth=center_depth,
+                    stand_width=stand_width,
+                ),
+                None,
+                None,
+                None,
+            ],
+            move="up",
+            label="Bottom",
+        )
+        if center_bridge_edge is not None:
             self.rectangularWall(
-                total_depth,
+                center_depth,
                 stand_width,
-                "ffff",
-                callback=[
-                    lambda: self._add_bottom_finger_holes(
-                        rear_section=rear_section,
-                        center_depth=center_depth,
-                        stand_width=stand_width,
-                    ),
-                    None,
-                    None,
-                    None,
-                ],
-                move="right",
-                label="Bottom",
-            )
-            if center_bridge_edge is not None:
-                self.rectangularWall(
-                    center_depth,
-                    stand_width,
-                    (center_bridge_edge, "f", center_bridge_edge, "f"),
-                    move="right",
-                    label="Center Bridge Top",
-                )
-
-    def _render_section_row(
-        self,
-        *,
-        row_y: float,
-        profile: StandSectionProfile,
-        stand_width: float,
-        bottom_edge: edges.BaseEdge,
-        center_depth: float,
-        center_height: float,
-        label_prefix: str,
-        top_depth_override: float | None = None,
-        top_front_edge_override: edges.BaseEdge | str | None = None,
-        top_back_edge_override: edges.BaseEdge | str | None = None,
-    ) -> None:
-        """Render the row containing all parts of one section.
-
-        Args:
-            row_y: Current vertical offset for the row.
-            profile: Section geometry profile.
-            stand_width: Overall stand width in mm.
-            bottom_edge: Edge profile for the bottom.
-            center_depth: Depth of the center bridge section.
-            center_height: Height of the center bridge section.
-            label_prefix: Prefix used for part labels.
-            top_depth_override: Optional override for the top depth.
-            top_front_edge_override: Optional override for the top front edge profile.
-            top_back_edge_override: Optional override for the top back edge profile.
-        Returns:
-            None.
-        """
-        with self.saved_context():
-            self.moveTo(0, row_y)
-            self._render_section_parts(
-                profile,
-                stand_width,
-                bottom_edge,
-                center_depth=center_depth,
-                center_height=center_height,
-                label_prefix=label_prefix,
-                top_depth_override=top_depth_override,
-                top_front_edge_override=top_front_edge_override,
-                top_back_edge_override=top_back_edge_override,
+                (center_bridge_edge, "f", center_bridge_edge, "f"),
+                move="up",
+                label="Center Bridge Top",
             )
 
     def _draw_combined_side_panel(
@@ -1023,7 +886,7 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             ("F", "e", "F", bottom_edge),
             # Skip finger holes near edges to keep the angled front clean.
             ignore_widths=self.FRONT_WALL_IGNORE_WIDTHS,
-            move="right",
+            move="up",
             label=f"{label_prefix} Front Wall",
         )
 
@@ -1049,7 +912,7 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             profile.face_panel_length,
             face_panel_width,
             face_panel_edges,
-            move="right",
+            move="up",
             label=f"{label_prefix} Face Panel",
         )
 
@@ -1092,7 +955,7 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             top_depth,
             stand_width,
             ("F", top_front_edge, "F", top_back_edge),
-            move="right",
+            move="up",
             label=f"{label_prefix} Top",
         )
 
@@ -1130,7 +993,7 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             # Skip finger holes near the base so the back wall seats cleanly.
             ignore_widths=self.BACK_WALL_IGNORE_WIDTHS,
             callback=back_wall_callback,
-            move="right",
+            move="up",
             label=f"{label_prefix} Back Wall",
         )
 
@@ -1148,6 +1011,29 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         # Two clips per panel (left/right).
         for _ in range(self.PANEL_HARDWARE_COUNT):
             self._render_face_panel_clip(profile.face_panel_length, "up", face_panel_mount=profile.face_panel_mount)
+
+    def _add_bottom_wall_finger_holes(
+        self,
+        wall_pos: float,
+        *,
+        stand_width: float,
+        clearance: float,
+        span_length: float,
+    ) -> None:
+        """Add finger holes to the bottom for a single wall position.
+
+        Args:
+            wall_pos: X offset for the wall in mm.
+            stand_width: Overall stand width in mm.
+            clearance: Clearance before the finger span in mm.
+            span_length: Length of the finger span in mm.
+        Returns:
+            None.
+        """
+        if span_length > 0:
+            self.fingerHolesAt(wall_pos, clearance, span_length, 90)
+        else:
+            self.fingerHolesAt(wall_pos, 0, stand_width, 90)
 
     def _add_bottom_finger_holes(
         self,
@@ -1170,16 +1056,49 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         # Offset by half a thickness so finger holes align with wall centers.
         rear_wall_pos = rear_section.depth - wall_offset
         clearance, span_length = self._finger_joint_span(stand_width)
-        if span_length > 0:
-            self.fingerHolesAt(rear_wall_pos, clearance, span_length, 90)
-        else:
-            self.fingerHolesAt(rear_wall_pos, 0, stand_width, 90)
+        self._add_bottom_wall_finger_holes(
+            rear_wall_pos,
+            stand_width=stand_width,
+            clearance=clearance,
+            span_length=span_length,
+        )
         if center_depth > 0:
             front_wall_pos = rear_section.depth + center_depth + wall_offset
-            if span_length > 0:
-                self.fingerHolesAt(front_wall_pos, clearance, span_length, 90)
-            else:
-                self.fingerHolesAt(front_wall_pos, 0, stand_width, 90)
+            self._add_bottom_wall_finger_holes(
+                front_wall_pos,
+                stand_width=stand_width,
+                clearance=clearance,
+                span_length=span_length,
+            )
+
+    def _panel_hardware_dims(self, *, slot_width_t: float) -> PanelHardwareDims:
+        """Return computed panel hardware dimensions based on material thickness."""
+        thickness = self.thickness
+        return PanelHardwareDims(
+            hole_x_offset=self.PANEL_HARDWARE_X_OFFSET_T * thickness,
+            hole_y_offset=self.PANEL_HARDWARE_Y_OFFSET_T * thickness,
+            slot_width=slot_width_t * thickness,
+            slot_height=self.PANEL_SLOT_HEIGHT_T * thickness,
+            center_slot_width=self.PANEL_CENTER_SLOT_WIDTH_T * thickness,
+        )
+
+    def _draw_panel_fasteners(
+        self,
+        face_panel_mount: str,
+        *,
+        centers_x: Sequence[float],
+        y: float,
+        slot_width: float,
+        slot_height: float,
+    ) -> None:
+        """Draw panel fasteners (slots or magnet holes) at the given centers."""
+        if face_panel_mount == "magnets":
+            for center_x in centers_x:
+                self.hole(center_x, y, d=self.panel_magnet_diameter)
+        else:
+            for center_x in centers_x:
+                # Slightly taller slots improve spring-tab clearance.
+                self.rectangularHole(center_x, y, slot_width, slot_height)
 
     def _render_face_panel_clip(
         self,
@@ -1199,27 +1118,29 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         """
         thickness = self.thickness
 
+        dims = self._panel_hardware_dims(slot_width_t=self.PANEL_CLIP_SLOT_WIDTH_T)
         total_width = face_panel_length
         clip_height = self.PANEL_CLIP_HEIGHT_T * thickness
         clip_side_height = self.PANEL_CLIP_SIDE_HEIGHT_T * thickness
-        hole_x_offset = self.PANEL_HARDWARE_X_OFFSET_T * thickness
-        hole_y_offset = self.PANEL_HARDWARE_Y_OFFSET_T * thickness
-        slot_width = self.PANEL_CLIP_SLOT_WIDTH_T * thickness
-        slot_height = self.PANEL_SLOT_HEIGHT_T * thickness
-        center_slot_width = self.PANEL_CENTER_SLOT_WIDTH_T * thickness
         total_height = clip_height
 
         if self.move(total_width, total_height, move, True):
             return
 
-        if face_panel_mount == "magnets":
-            self.hole(hole_x_offset, hole_y_offset, d=self.panel_magnet_diameter)
-            self.hole(face_panel_length - hole_x_offset, hole_y_offset, d=self.panel_magnet_diameter)
-        else:
-            # Slightly taller slots improve spring-tab clearance.
-            self.rectangularHole(hole_x_offset, hole_y_offset, slot_width, slot_height)
-            self.rectangularHole(face_panel_length - hole_x_offset, hole_y_offset, slot_width, slot_height)
-            self.rectangularHole(face_panel_length / 2, hole_y_offset, center_slot_width, thickness)
+        self._draw_panel_fasteners(
+            face_panel_mount,
+            centers_x=(dims.hole_x_offset, face_panel_length - dims.hole_x_offset),
+            y=dims.hole_y_offset,
+            slot_width=dims.slot_width,
+            slot_height=dims.slot_height,
+        )
+        if face_panel_mount == "springs":
+            self.rectangularHole(
+                face_panel_length / 2,
+                dims.hole_y_offset,
+                dims.center_slot_width,
+                thickness,
+            )
 
         self.polyline(face_panel_length, 90, clip_side_height, 90)
         self.edges["f"](face_panel_length)
@@ -1288,21 +1209,22 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         Returns:
             None.
         """
-        thickness = self.thickness
-        hole_x_offset = self.PANEL_HARDWARE_X_OFFSET_T * thickness
-        hole_y_offset = self.PANEL_HARDWARE_Y_OFFSET_T * thickness
-        slot_width = self.PANEL_EDGE_SLOT_WIDTH_T * thickness
-        slot_height = self.PANEL_SLOT_HEIGHT_T * thickness
-        if face_panel_mount == "magnets":
-            self.hole(hole_x_offset, hole_y_offset, d=self.panel_magnet_diameter)
-        else:
-            # Slightly taller slots improve spring-tab clearance.
-            self.rectangularHole(hole_x_offset, hole_y_offset, slot_width, slot_height)
+        dims = self._panel_hardware_dims(slot_width_t=self.PANEL_EDGE_SLOT_WIDTH_T)
+        self._draw_panel_fasteners(
+            face_panel_mount,
+            centers_x=(dims.hole_x_offset,),
+            y=dims.hole_y_offset,
+            slot_width=dims.slot_width,
+            slot_height=dims.slot_height,
+        )
         self.edge(edge_length)
-        if face_panel_mount == "magnets":
-            self.hole(-hole_x_offset, hole_y_offset, d=self.panel_magnet_diameter)
-        else:
-            self.rectangularHole(-hole_x_offset, hole_y_offset, slot_width, slot_height)
+        self._draw_panel_fasteners(
+            face_panel_mount,
+            centers_x=(-dims.hole_x_offset,),
+            y=dims.hole_y_offset,
+            slot_width=dims.slot_width,
+            slot_height=dims.slot_height,
+        )
 
     def _draw_top_edge_segment(self, profile: StandSectionProfile) -> None:
         """Draw the top edge segment for a section if present.
@@ -1332,6 +1254,21 @@ The side panels and bottom are each drawn as single parts spanning all three seg
             return 0.0, 0.0
         return clearance, span_length
 
+    def _compound_finger_edge(self, length: float, *, fallback: str) -> edges.BaseEdge | str:
+        """Return an edge with centered finger joints or a fallback edge.
+
+        Args:
+            length: Total edge length.
+            fallback: Edge spec used when no finger span fits.
+        Returns:
+            edges.BaseEdge | str: Edge profile for the given length.
+        """
+        clearance, span_length = self._finger_joint_span(length)
+        if span_length > 0:
+            # Keep finger joints in the middle span to avoid tight corners.
+            return edges.CompoundEdge(self, ("e", "f", "e"), (clearance, span_length, clearance))
+        return fallback
+
     def _back_wall_bottom_edge(self, stand_width: float) -> edges.BaseEdge | str:
         """Return a bottom edge profile for a section back wall.
 
@@ -1340,10 +1277,7 @@ The side panels and bottom are each drawn as single parts spanning all three seg
         Returns:
             edges.BaseEdge | str: Edge profile for the back wall bottom.
         """
-        clearance, span_length = self._finger_joint_span(stand_width)
-        if span_length > 0:
-            return edges.CompoundEdge(self, ("e", "f", "e"), (clearance, span_length, clearance))
-        return "f"
+        return self._compound_finger_edge(stand_width, fallback="f")
 
     def _flush_back_top_edge(self) -> edges.BaseEdge:
         """Return a finger joint edge with zero start width for flush top edges.

@@ -1,0 +1,136 @@
+graph TD
+
+  %% ============ POWER SUPPLY ============
+  AC[AC Mains] --> PSU[5V / 40A Metal-Can PSU<br/>Terminals: V+1 V-1 V+2 V-2 FG]
+
+  FG[Earth / Chassis - optional]:::opt
+  PSU -->|FG| FG
+
+  %% Use V+1/V-1 as "LED branch"
+  PSU -->|V+1| F_MAIN[Main LED Branch Fuse<br/>25–30A size to wiring] --> PWR_LED[Power Distribution / Breakout<br/>LED 5V Bus]
+  PSU -->|V-1| GND_BUS[GND Bus / Star Ground]
+
+  %% Bulk cap at LED distribution
+  C_LED[Electrolytic Bulk Cap<br/>1000–2200µF, ≥10V]:::cap
+  PWR_LED --- C_LED --- GND_BUS
+
+  %% Optional: fuse each panel separately (recommended)
+  F_P1[Panel 1 Fuse<br/>15A] --> PANEL1[WS2812B Panel 1<br/>16x16]
+  F_P2[Panel 2 Fuse<br/>15A] --> PANEL2[WS2812B Panel 2<br/>16x16]
+  PWR_LED --> F_P1
+  PWR_LED --> F_P2
+  GND_BUS --> PANEL1
+  GND_BUS --> PANEL2
+
+  %% Optional extra bulk cap near panel 2 (if long run)
+  C_P2[Optional Cap near Panel 2<br/>470–1000µF, ≥10V]:::opt
+  PANEL2 --- C_P2 --- GND_BUS
+
+  %% ============ LOGIC POWER (XIAO) ============
+  %% Use V+2/V-2 as "logic branch" terminals (internally same rail as V+1/V-1; separate screws for tidy wiring)
+  PSU -->|V+2| D_SCH[Schottky Diode<br/>1N5819] --> V5_MCU[5V Node post-diode<br/>XIAO 5V pin]
+  PSU -->|V-2| GND_BUS
+
+  %% Local caps for MCU node
+  C_MCU[Local Cap @ XIAO 5V<br/>47–100µF, ≥10V]:::cap
+  C_MCU2[0.1µF Ceramic @ XIAO 5V]:::cap
+  V5_MCU --- C_MCU --- GND_BUS
+  V5_MCU --- C_MCU2 --- GND_BUS
+
+  %% ============ XIAO BOARD ============
+  subgraph XIAO[Seeed XIAO ESP32S3 Sense]
+    X_5V[5V pin]
+    X_3V3[3V3 pin OUT]
+    X_GND[GND]
+    X_LED[GPIO: LED_DATA]
+    X_SCL[GPIO: I2C SCL]
+    X_SDA[GPIO: I2C SDA]
+    X_FANPWM[GPIO: FAN_PWM]
+    X_UP[GPIO: BTN_UP]
+    X_DOWN[GPIO: BTN_DOWN]
+    X_LEFT[GPIO: BTN_LEFT]
+    X_RIGHT[GPIO: BTN_RIGHT]
+  end
+
+  V5_MCU --> X_5V
+  GND_BUS --> X_GND
+
+  %% ============ SN74AHCT125N LEVEL SHIFTER ============
+  subgraph SHIFTER[SN74AHCT125N DIP-14]
+    U_VCC[Pin14 VCC]
+    U_GND[Pin7 GND]
+    U_1OE[Pin1 1OE active LOW]
+    U_1A[Pin2 1A]
+    U_1Y[Pin3 1Y]
+    U_UNUSED[Unused channels: disable OEs, tie inputs]:::opt
+  end
+
+  %% Power the shifter from the same 5V node as the XIAO (post-diode) so it is powered whenever the XIAO is.
+  V5_MCU --> U_VCC
+  GND_BUS --> U_GND
+
+  %% Decoupling at the shifter IC
+  C_U[0.1µF Ceramic<br/>at SN74 VCC-GND]:::cap
+  U_VCC --- C_U --- U_GND
+
+  %% Enable channel 1
+  U_1OE -->|tie to GND| GND_BUS
+
+  %% Data path
+  X_LED --> U_1A
+  U_1Y --> R_DATA[330Ω series resistor] --> PANEL1_DIN[(Panel 1 DIN)]
+
+  %% Panel-to-panel data (use data + ground reference; do not rely on this cable for power)
+  PANEL1_DATA_OUT[(Panel 1 Data Out)] --> PANEL2_DIN[(Panel 2 DIN)]
+  GND_BUS -. reference .- PANEL2_DIN
+
+  %% ============ OLED (I2C) ============
+  OLED[0.96 I2C OLED SSD1306]:::ui
+  X_3V3 --> OLED
+  X_GND --> OLED
+  X_SCL --> OLED
+  X_SDA --> OLED
+
+  C_OLED[0.1µF Ceramic<br/>near OLED VCC-GND]:::cap
+  X_3V3 --- C_OLED --- X_GND
+
+  %% Optional I2C pullups (only if your OLED board doesn't already include them)
+  R_PU[Optional I2C Pullups<br/>2× 4.7kΩ to 3V3]:::opt
+  X_3V3 -.-> R_PU
+  R_PU -.-> X_SCL
+  R_PU -.-> X_SDA
+
+  %% ============ BUTTONS ============
+  BTN_UP[Momentary Button: UP]:::ui
+  BTN_DOWN[Momentary Button: DOWN]:::ui
+  BTN_LEFT[Momentary Button: LEFT]:::ui
+  BTN_RIGHT[Momentary Button: RIGHT]:::ui
+
+  X_UP --> BTN_UP --> GND_BUS
+  X_DOWN --> BTN_DOWN --> GND_BUS
+  X_LEFT --> BTN_LEFT --> GND_BUS
+  X_RIGHT --> BTN_RIGHT --> GND_BUS
+
+  %% ============ FAN (PWM) ============
+  FAN[5V Exhaust Fan<br/>~1 / 25mm]:::ui
+  PWR_LED -->|+5V| FAN
+
+  subgraph FANCTRL[Fan PWM Switch low-side]
+    Q1[N-MOSFET Option A: AO3400A SOT-23<br/>Option B: IRLZ44N TO-220]:::part
+    R_G[Gate resistor 100Ω]:::part
+    R_PD[Gate pulldown 100kΩ]:::part
+    D_FAN[Optional diode across fan<br/>1N5819 or 1N4148]:::opt
+  end
+
+  FAN -->|Fan -| Q1
+  Q1 -->|Source| GND_BUS
+  X_FANPWM --> R_G -->|Gate| Q1
+  Q1 --- R_PD --- GND_BUS
+
+  %% Optional diode across the fan
+  FAN --- D_FAN --- GND_BUS
+
+  classDef cap fill:#eef,stroke:#335;
+  classDef ui fill:#efe,stroke:#353;
+  classDef opt fill:#ffe,stroke:#aa6,stroke-dasharray: 4 3;
+  classDef part fill:#f3f3f3,stroke:#666;
